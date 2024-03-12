@@ -1,0 +1,140 @@
+---
+title: "How to use Userstack with React and Firebase Auth"
+date: "2024-03-12"
+image: "https://raw.githubusercontent.com/userstackapp/blog/main/assets/react.jpg"
+category: "Guides"
+author: "Shane Neubauer"
+authorPicture: "https://lh3.googleusercontent.com/-jOR1XxxSyGo/AAAAAAAAAAI/AAAAAAAAAAA/ALKGfkn7tWW6K2aVbV2xfLquRDEqrCdrhA/s128-c/photo.jpg"
+---
+
+Userstack is built from the ground up for a great developer experience. One of the first things we released, shortly after building a solid-but-easy API, was to ship a ReactJS client library and powerful hook.
+
+This library essentially helps you integrate all of the client stuff effortlessly.
+
+In this article we’ll look through some examples and explore how they work, so you can have a deeper understanding of whats going on in your app.
+
+### Identifying a user
+
+Identifying a user is one of the fundamental steps of integrating Userstack. It is how Userstack hooks into your authentication and knows who the user is. How it can do its job of connecting them to a team, an organisation, a subscription, and to the features they should see.
+
+If you’re using Firebase or Google’s sign in libraries, then fortunately Userstack can natively understand and use the token it gives you. If you’re using something else, you’ll need to add a little more code to tell Userstack about the user yourself. (but we’re adding support for new platforms all the time)
+
+Identifying a user is as simple as this:
+
+```tsx
+identify(idToken);
+```
+
+Ok, that was probably too simple to properly understand what’s going on, so I’ll add some more context around it. Here is a NextJS page which imports the Userstack React hook, implements Firebase sign in, and connects it to Userstack:
+
+```tsx
+import {
+  initializeApp,
+  getAuth,
+  signInWithPopup,
+  GoogleAuthProvider,
+} from "firebase/auth";
+import useUserstack from "@userstack/react";
+
+export default function MyPage() {
+  const { identify } = useUserstack();
+
+  const signinWithGoogle = async () => {
+    const app = initializeApp({
+      /* your config */
+    });
+    const provider = new GoogleAuthProvider();
+    const auth = getAuth(app);
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+
+      if (credential?.idToken) {
+        // Identify the user with Userstack
+        identify(credential.idToken, {
+          groupId: "acme", // You can optionally give information about the team/company
+          groupName: "ACME Inc.",
+        });
+      }
+    } catch (error) {
+      console.error("Something went wrong!", error);
+    }
+  };
+
+  return (
+    <div>
+      <button onClick={signinWithGoogle}>Sign In</button>
+    </div>
+  );
+}
+```
+
+You’ll notice that most of the code is React and Firebase. Userstack slots elegantly in there.
+
+What’s happening here? In this example, The JWT from Firebase is given to Userstack, which uses the Google certificates to decode and verify the user identity.
+
+Next the Userstack backend sets up a ‘session’, giving a special session ID to the client, which gets stored in a cookie. Along with the session ID, it will also send back which features should be enabled or disabled for the user. It figures that out by looking at the group that the user is part of.
+
+Here are the things it will do for you:
+
+1. It will cache the session ID information locally so the client keeps track of the session
+2. It will cache the feature flags locally so the client can quickly reference them
+3. It will automatically refresh the feature flags, so any feature changes take effect
+
+### Refreshing a session
+
+Refreshing a session is something that the client library will do automatically for you, but if you need to refresh it manually for some reason, here’s how to do that:
+
+```tsx
+const { refresh } = useUserstack(); // get the refresh function from the hook
+
+refresh();
+```
+
+In this code, the client library will take an existing session and ask the Userstack backend for a refresher on your feature flag config. It will only work for an existing session, meaning the user needs to be identified first.
+
+### Upgrading a plan
+
+Upgrading a plan with Userstack is very simple. You need to first have created a plan in the Userstack web UI, along with the plan ID. The plan IDs are shown on the plans page, and look like this: `plan_ABCDWXYZ`
+
+In your code, you can start a plan upgrade like this:
+
+```tsx
+const { upgrade } = useUserstack(); // get the upgrade function from the hook
+
+upgrade(
+  "plan_ABCDWXYZ",
+  "https://yourapp.com/success", // optional pages to redirect the user after payment
+  "https://yourapp.com/cancel"
+);
+```
+
+When you run the `upgrade` function, a number of things happen in the background for you:
+
+1. The Userstack backend interacts with Stripe to set up a billing session
+2. The Userstack client library redirects the user to a unique Stripe URL to complete payment
+3. The Userstack backend will monitor Stripe’s events for payments
+4. The Userstack backend will update the internal records for the user’s group, to reflect the plan change
+5. The Userstack backend will continuously monitor for any Stripe events indefinitely, to ensure they are allowed to stay on the plan. eg. if their credit card expires and they fail to make a payment, it will automatically downgrade them
+
+After the user has paid for the subscription, it will redirect them back to your app, for a clean and simple user experience.
+
+Meanwhile, the feature flags will be refreshed, to reflect that they now should have access to more things according to the plan they just paid for.
+
+### Using a feature flag
+
+Using a feature flag is just as easy. You’ll remember when setting up your features and plans, you will have chosen a “key” for each feature. It will look something like `your_feature_name`
+
+This is the key you’ll use in your code, when accessing any flags. Here’s a small example to demonstrate:
+
+```tsx
+const { flags } = useUserstack();
+
+if (flags.my_feature) {
+  // User should have access to this feature
+} else {
+  // User should NOT have access
+}
+```
+
+As you can see, the integration and usage is made insanely simple using the React library. For any more questions or support, please [write an email](mailto:support@userstack.app) and we’ll get back to you ASAP.
